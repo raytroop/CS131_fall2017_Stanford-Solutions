@@ -9,8 +9,8 @@ def energy_function(image):
     Don't forget to convert to grayscale first.
 
     Hint: you can use np.gradient here
-    The gradient is computed using second order accurate central differences in the interior points 
-    and either first or second order accurate one-sides (forward or backwards) differences 
+    The gradient is computed using second order accurate central differences in the interior points
+    and either first or second order accurate one-sides (forward or backwards) differences
     at the boundaries. The returned gradient hence has the same shape as the input array.
 
     Args:
@@ -435,22 +435,40 @@ def compute_forward_cost(image, energy):
     paths[0] = 0  # we don't care about the first row of paths
 
     ### YOUR CODE HERE
-    _, gradient_h = np.gradient(energy)
-    gradient_h[:, 1:-1] = 2 * gradient_h[:, 1:-1]
-    gradient_h[:, [0, -1]]= energy[:, [0, -1]]
-    gradient_h = np.abs(gradient_h)
-    for i in range(1, H):
-        cl_i = np.concatenate((np.array([np.inf]), np.abs(energy[i, :-1] - energy[i-1, 1:])))
-        cv_i = 0.0
-        cr_i = np.concatenate((np.abs(energy[i, 1:] - energy[i-1, :-1]), np.array([np.inf])))
+    # _, gradient_h = np.gradient(energy)
+    # gradient_h[:, 1:-1] = 2 * gradient_h[:, 1:-1]
+    # gradient_h[:, [0, -1]]= energy[:, [0, -1]]
+    # gradient_h = np.abs(gradient_h)
+    # for i in range(1, H):
+    #     cl_i = np.concatenate((np.array([np.inf]), np.abs(energy[i, :-1] - energy[i-1, 1:])))
+    #     cv_i = 0.0
+    #     cr_i = np.concatenate((np.abs(energy[i, 1:] - energy[i-1, :-1]), np.array([np.inf])))
 
-        cl_i = cl_i + gradient_h[i] + np.concatenate((np.array([np.inf]), cost[i-1, :-1]))
-        cv_i = cv_i + gradient_h[i] + cost[i-1, :]
-        cr_i = cr_i + gradient_h[i] + np.concatenate((cost[i-1, 1:], np.array([np.inf])))
-        cost_i = np.c_[cl_i, cv_i, cr_i]
-        idx_sort = np.argsort(cost_i, axis=1)
-        paths[i] = idx_sort[:, 0] - 1
-        cost[i] = np.min(cost_i, axis=1)
+    #     cl_i = cl_i + gradient_h[i] + np.concatenate((np.array([np.inf]), cost[i-1, :-1]))
+    #     cv_i = cv_i + gradient_h[i] + cost[i-1, :]
+    #     cr_i = cr_i + gradient_h[i] + np.concatenate((cost[i-1, 1:], np.array([np.inf])))
+    #     cost_i = np.c_[cl_i, cv_i, cr_i]
+    #     idx_sort = np.argsort(cost_i, axis=1)
+    #     paths[i] = idx_sort[:, 0] - 1
+    #     cost[i] = np.min(cost_i, axis=1)
+
+    # https://github.com/mikucy/CS131/blob/master/hw4_release/seam_carving.py
+    for i in range(1, H):
+        m1 = np.insert(image[i, 0:W-1], 0, 0, axis=0)
+        m2 = np.insert(image[i, 1:W], W-1, 0, axis=0)
+        m3 = image[i-1]
+        c_v = np.abs(m1 - m2)
+        c_v[[0, -1]] = 0
+        c_l = c_v + np.abs(m3 - m1)
+        c_r = c_v + np.abs(m3 - m2)
+        c_l[0] = 0
+        c_r[-1] = 0
+        i1 = np.insert(cost[i-1, 0:W-1], 0, 1e10, axis=0)
+        i2 = cost[i-1]
+        i3 = np.insert(cost[i-1, 1:W], W-1, 1e10, axis=0)
+        C = np.r_[i1 + c_l, i2 + c_v, i3 + c_r].reshape(3, -1)  # pylint: disable=E1121, E1111
+        cost[i] = energy[i] + np.min(C, axis=0)
+        paths[i] = np.argmin(C, axis=0) - 1
     ### END YOUR CODE
 
     # Check that paths only contains -1, 0 or 1
@@ -515,22 +533,48 @@ def remove_object(image, mask):
         out: numpy array of shape (H, W, 3)
     """
     out = np.copy(image)
-    H, W, C = image.shape
-    ### YOUR CODE HERE
-    out[mask] = np.mean(out[mask], (0,1))
-    n_seams = np.sum(np.sum(mask, axis=1) > 0)
-    n_iteration = 4
-    import matplotlib.pyplot as plt
-    plt.rcParams['figure.figsize'] = (15.0, 12.0)
-    for i in range(n_iteration):
-        out = reduce(out, H-n_seams*2, axis=0, cfunc=compute_forward_cost)
-        out = enlarge(out, H, axis=0, cfunc=compute_forward_cost) 
-        plt.subplot(2, n_iteration//2, i+1)
-        plt.title('pass {}'.format(i+1))
-        plt.imshow(out)
-        plt.axis('off')
-    plt.tight_layout()
-    plt.show()
-    ### END YOUR CODE
 
+    ### YOUR CODE HERE
+    # Refer to @lgqfhwy
+    # https://github.com/mikucy/CS131/issues/3#issue-328719868
+    from skimage import measure
+    label_image = measure.label(mask)
+    regions = measure.regionprops(label_image)
+    region = regions[0]
+    if len(regions) != 1:
+        print("Maybe two objects to remove?")
+        # Find the biggest area of region
+        for i in regions:
+            if i.area > region.area:
+                region = i
+    transposeImage = False
+    # Bounding box (min_row, min_col, max_row, max_col)
+    if region.bbox[2] - region.bbox[0] < region.bbox[3] - region.bbox[1]:
+        out = np.transpose(out, (1, 0, 2))
+        mask = np.transpose(mask, (1, 0))
+        transposeImage = True
+    count = 0   # count time for all iteration
+    # def rowcol(mat):
+    #     cols = np.sum(np.sum(mat, axis=0) > 0)
+    #     rows = np.sum(np.sum(mat, axis=1) > 0)
+    #     return rows, cols
+    # print('row {} cols {}'.format(*(rowcol(mask))))
+    while not np.all(mask == 0):
+        # print(count, out.shape)
+        energy_image = energy_function(out)
+        energy_image = energy_image + energy_image * mask * (-100)
+        vcost, vpaths = compute_forward_cost(out, energy_image)
+        end = np.argmin(vcost[-1])
+        seam = backtrack_seam(vpaths, end)
+        out = remove_seam(out, seam)
+        # print(count, out.shape)
+        mask = remove_seam(mask, seam)
+        # print('row {} cols {}'.format(*(rowcol(mask))))
+        # print(out.shape, mask.shape)
+        count += 1
+    #print("count = ", count)
+    out = enlarge(out, out.shape[1] + count)
+    if transposeImage:
+        out = np.transpose(out, (1, 0, 2))
+    ### END YOUR CODE
     return out
