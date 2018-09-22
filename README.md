@@ -9,7 +9,7 @@ This repository contains my solutions for assignments of the **fall 2017 iterati
 - [x] hw4: Resizing - Seam carving
 - [x] hw5: Segmentation - Clustering
 - [x] hw6: Recognition - Classification
-- [ ] hw7: Object detection - constellation models
+- [x] hw7: Object detection - constellation models
 - [ ] hw8: Tracking - Optical flow
 
 ### official link
